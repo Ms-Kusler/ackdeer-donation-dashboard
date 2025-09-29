@@ -1,9 +1,6 @@
-import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
-import { eq } from 'drizzle-orm';
-import * as schema from '../shared/schema';
-import { insertDonationSchema } from '../shared/schema';
-import { ZodError } from 'zod';
+import { NextApiRequest, NextApiResponse } from "next";
+import { insertDonationSchema } from "../shared/schema";
+import { storage } from "../server/storage";
 
 interface VercelRequest {
   method: string;
