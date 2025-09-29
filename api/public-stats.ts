@@ -1,42 +1,28 @@
-import { NextApiRequest, NextApiResponse } from "next";
-import { storage } from "../server/storage";
-import { donations } from "../shared/schema";
+const { Pool } = require('pg');
 
-const dbSql = neon(process.env.DATABASE_URL!);
-const db = drizzle(dbSql, { schema });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+module.exports = async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COALESCE(SUM(amount), 0)::numeric(12,2) AS total_amount,
+        COUNT(*)::int                        AS total_donations,
+        COUNT(DISTINCT donor_email)::int     AS donors
+      FROM public.donations
+    `);
 
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
+    const r = rows[0] || {};
+    res.status(200).json({
+      success: true,
+      totalAmount: Number(r.total_amount || 0),
+      totalDonations: Number(r.total_donations || 0),
+      totalDonors: Number(r.donors || 0),
+    });
+  } catch (err) {
+    console.error('public-stats.js error:', err && err.message ? err.message : err);
+    res.status(500).json({ success: false, message: 'Failed to load stats' });
   }
-
-  if (req.method === 'GET') {
-    try {
-      const stats = await db.select({
-        totalDonations: sum(schema.donations.amount),
-        donorCount: count(schema.donations.id),
-        mealCount: sql<number>`COALESCE(SUM(CAST(${schema.donations.amount} AS DECIMAL) * 4), 0)`
-      }).from(schema.donations);
-
-      const result = stats[0];
-      
-      res.json({
-        totalDonations: result.totalDonations || "0",
-        donorCount: result.donorCount.toString(),
-        mealCount: Math.floor(Number(result.mealCount)).toString()
-      });
-    } catch (error) {
-      console.error("Error fetching public stats:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  } else {
-    res.status(405).json({ error: 'Method not allowed' });
-  }
-}
+};
