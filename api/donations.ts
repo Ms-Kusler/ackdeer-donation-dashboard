@@ -1,9 +1,21 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
+import { eq } from 'drizzle-orm';
 import * as schema from '../shared/schema';
 import { insertDonationSchema } from '../shared/schema';
 import { ZodError } from 'zod';
+
+interface VercelRequest {
+  method: string;
+  body: any;
+}
+
+interface VercelResponse {
+  setHeader: (key: string, value: string) => void;
+  status: (code: number) => VercelResponse;
+  json: (data: any) => void;
+  end: () => void;
+}
 
 const sql = neon(process.env.DATABASE_URL!);
 const db = drizzle(sql, { schema });
@@ -14,7 +26,7 @@ async function sendThankYouEmail(email: string, name: string, amount: string) {
   return true;
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -43,7 +55,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Update email status
       await db.update(schema.donations)
         .set({ emailSent: true })
-        .where(schema.eq(schema.donations.id, donation.id));
+        .where(eq(schema.donations.id, donation.id));
 
       res.json({ success: true, donation });
     } catch (error) {
