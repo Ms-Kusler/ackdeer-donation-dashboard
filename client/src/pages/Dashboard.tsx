@@ -1,7 +1,7 @@
 import Hero from '@/components/Hero';
 import KpiCards from '@/components/KpiCards';
 import Charts from '@/components/Charts';
-import DonationForm from '@/components/DonationForm';
+import SimpleDonationForm from '@/components/SimpleDonationForm';
 
 export default function Dashboard() {
   return (
@@ -16,7 +16,7 @@ export default function Dashboard() {
           </div>
           
           <div className="lg:col-span-1">
-            <DonationForm />
+            <SimpleDonationForm/>
           </div>
         </div>
       </div>
