@@ -1,108 +1,152 @@
-import type { Express } from "express";
-import { createServer, type Server } from "http";
-import { storage } from "./storage";
-import { insertDonationSchema } from "@shared/schema";
-import { ZodError } from "zod";
+// server/routes.ts
+import type { Express, Request, Response } from "express";
+import { Pool } from "pg";
 
-export async function registerRoutes(app: Express): Promise<Server> {
-  // Donation endpoints
-  app.post("/api/donations", async (req, res) => {
-    try {
-      const validatedData = insertDonationSchema.parse(req.body);
-      const donation = await storage.createDonation(validatedData);
-      
-      // TODO: Send thank you email
-      await sendThankYouEmail(donation.donorEmail, donation.donorName, donation.amount);
-      await storage.updateDonationEmailStatus(donation.id, true);
-      
-      res.json({ success: true, donation: donation });
-    } catch (error) {
-      if (error instanceof ZodError) {
-        res.status(400).json({ error: "Invalid donation data", details: error.errors });
-      } else {
-        console.error("Error creating donation:", error);
-        res.status(500).json({ error: "Internal server error" });
-      }
-    }
-  });
+/**
+ * Neon (Postgres) connection.
+ * Make sure DATABASE_URL is set in your hosting env (Vercel/Render/Railway).
+ * Example: postgres://user:pass@host/db?sslmode=require
+ */
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
-  // Public statistics endpoint (for live dashboard display)
-  app.get("/api/public-stats", async (req, res) => {
-    try {
-      const stats = await storage.getPublicStats();
-      res.json(stats || {
-        totalDonations: "0",
-        donorCount: "0", 
-        mealsProvided: "0",
-        deerProcessed: "0",
-        lastUpdated: new Date()
-      });
-    } catch (error) {
-      console.error("Error getting public stats:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // Monthly donations for chart data
-  app.get("/api/monthly-donations", async (req, res) => {
-    try {
-      const monthlyData = await storage.getMonthlyDonations();
-      res.json(monthlyData);
-    } catch (error) {
-      console.error("Error getting monthly donations:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // Admin endpoint to get all donations (private data)
-  app.get("/api/admin/donations", async (req, res) => {
-    try {
-      // TODO: Implement proper authentication/authorization
-      const authHeader = req.headers.authorization;
-      if (!authHeader || authHeader !== 'Bearer admin-key-placeholder') {
-        return res.status(401).json({ error: "Unauthorized access" });
-      }
-      
-      const donations = await storage.getDonations();
-      // Return only necessary fields for admin view, mask sensitive data
-      const maskedDonations = donations.map(donation => ({
-        id: donation.id,
-        amount: donation.amount,
-        donationType: donation.donationType,
-        donorName: donation.donorName,
-        donorEmail: donation.donorEmail.replace(/(.{2}).*@/, '$1***@'), // Mask email
-        isAnonymous: donation.isAnonymous,
-        createdAt: donation.createdAt,
-        emailSent: donation.emailSent
-      }));
-      res.json(maskedDonations);
-    } catch (error) {
-      console.error("Error getting donations:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  const httpServer = createServer(app);
-
-  return httpServer;
+/**
+ * Helper for safe numeric parsing from JSON body.
+ */
+function toNumber(n: unknown): number | null {
+  const num = typeof n === "string" ? Number(n) : (n as number);
+  return Number.isFinite(num) ? num : null;
 }
 
-// Email service function (placeholder for now)
-async function sendThankYouEmail(email: string, name: string, amount: string): Promise<void> {
-  // TODO: Implement with Resend API
-  console.log(`Sending thank you email for donation of $${amount}`);
-  // Note: Removed PII from logs for security
-  
-  try {
-    // TODO: Replace with actual email service implementation
-    // await resend.emails.send({
-    //   from: 'donations@ackdeerproject.org',
-    //   to: email,
-    //   subject: 'Thank you for your donation!',
-    //   html: generateThankYouEmailTemplate(name, amount)
-    // });
-  } catch (error) {
-    console.error('Failed to send thank you email:', error.message);
-    throw error; // Re-throw to handle in donation endpoint
-  }
+export async function registerRoutes(app: Express): Promise<void> {
+  // Healthcheck
+  app.get("/api/health", (_req: Request, res: Response) => {
+    res.json({ ok: true });
+  });
+
+  /**
+   * POST /api/donations
+   * Persist a donation submitted from the front-end form.
+   * Expects JSON body matching SimpleDonationForm.tsx submit payload.
+   */
+  app.post("/api/donations", async (req: Request, res: Response) => {
+    try {
+      const {
+        donorName,
+        donorEmail,
+        amount,
+        donationType,
+        donorPhone,
+        donorAddress,
+        publicMessage,
+        isAnonymous,
+      } = (req.body ?? {}) as {
+        donorName?: string;
+        donorEmail?: string;
+        amount?: number | string;
+        donationType?: string;
+        donorPhone?: string | null;
+        donorAddress?: string | null;
+        publicMessage?: string | null;
+        isAnonymous?: boolean;
+      };
+
+      const amountNumber = toNumber(amount);
+
+      if (!donorName || !donorEmail || amountNumber === null || amountNumber < 0) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Missing or invalid required fields" });
+      }
+
+      const result = await pool.query(
+        `INSERT INTO public.donations
+          (donor_name, donor_email, amount, donation_type, donor_phone, donor_address, public_message, is_anonymous)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         RETURNING id, created_at`,
+        [
+          donorName,
+          donorEmail,
+          amountNumber,
+          donationType ?? "monetary",
+          donorPhone ?? null,
+          donorAddress ?? null,
+          publicMessage ?? null,
+          Boolean(isAnonymous),
+        ]
+      );
+
+      return res.status(201).json({
+        success: true,
+        id: result.rows[0].id,
+        createdAt: result.rows[0].created_at,
+      });
+    } catch (err: any) {
+      console.error("Error saving donation:", err?.message || err);
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to save donation" });
+    }
+  });
+
+  /**
+   * GET /api/public-stats
+   * Aggregates for KPI cards (total amount, total donors, total entries).
+   */
+  app.get("/api/public-stats", async (_req: Request, res: Response) => {
+    try {
+      const { rows } = await pool.query<{
+        total_amount: string | null;
+        total_donations: string;
+        donors: string;
+      }>(`
+        SELECT
+          COALESCE(SUM(amount), 0)::numeric(12,2) AS total_amount,
+          COUNT(*)::int                        AS total_donations,
+          COUNT(DISTINCT donor_email)::int     AS donors
+        FROM public.donations
+      `);
+
+      const r = rows[0];
+      return res.json({
+        success: true,
+        totalAmount: Number(r.total_amount ?? 0),
+        totalDonations: Number(r.total_donations),
+        totalDonors: Number(r.donors),
+      });
+    } catch (err: any) {
+      console.error("Stats error:", err?.message || err);
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to load stats" });
+    }
+  });
+
+  /**
+   * GET /api/monthly-donations
+   * Time series for charts: sum(amount) per month.
+   */
+  app.get("/api/monthly-donations", async (_req: Request, res: Response) => {
+    try {
+      const { rows } = await pool.query<{ month: string; total: string }>(`
+        SELECT
+          to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
+          COALESCE(SUM(amount), 0)::numeric(12,2)            AS total
+        FROM public.donations
+        GROUP BY 1
+        ORDER BY 1
+      `);
+
+      return res.json({
+        success: true,
+        series: rows.map(r => ({ month: r.month, total: Number(r.total) })),
+      });
+    } catch (err: any) {
+      console.error("Monthly series error:", err?.message || err);
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to load monthly data" });
+    }
+  });
 }
