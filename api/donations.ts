@@ -1,69 +1,58 @@
-import { NextApiRequest, NextApiResponse } from "next";
-import { insertDonationSchema } from "../shared/schema";
-import { storage } from "../server/storage";
+const { Pool } = require('pg');
 
-interface VercelRequest {
-  method: string;
-  body: any;
-}
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
-interface VercelResponse {
-  setHeader: (key: string, value: string) => void;
-  status: (code: number) => VercelResponse;
-  json: (data: any) => void;
-  end: () => void;
-}
-
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql, { schema });
-
-// Mock email function
-async function sendThankYouEmail(email: string, name: string, amount: string) {
-  console.log(`Thank you email would be sent to ${email} for ${name} - Amount: $${amount}`);
-  return true;
-}
-
-export default async function handler(req: any, res: any) {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
-
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
+module.exports = async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
   }
 
-  if (req.method === 'POST') {
-    try {
-      const validatedData = insertDonationSchema.parse(req.body);
-      
-      const [donation] = await db.insert(schema.donations).values({
-        ...validatedData,
-        amount: validatedData.amount.toString(),
-        createdAt: new Date(),
-        emailSent: false
-      }).returning();
+  try {
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    const {
+      donorName,
+      donorEmail,
+      amount,
+      donationType,
+      donorPhone,
+      donorAddress,
+      publicMessage,
+      isAnonymous,
+    } = body;
 
-      // Send thank you email
-      await sendThankYouEmail(donation.donorEmail, donation.donorName, donation.amount);
-      
-      // Update email status
-      await db.update(schema.donations)
-        .set({ emailSent: true })
-        .where(eq(schema.donations.id, donation.id));
-
-      res.json({ success: true, donation });
-    } catch (error) {
-      if (error instanceof ZodError) {
-        res.status(400).json({ error: "Invalid donation data", details: error.errors });
-      } else {
-        console.error("Error creating donation:", error);
-        res.status(500).json({ error: "Internal server error" });
-      }
+    const amt = Number(amount);
+    if (!donorName || !donorEmail || !Number.isFinite(amt)) {
+      res.status(400).json({ success: false, message: 'Missing or invalid fields' });
+      return;
     }
-  } else {
-    res.status(405).json({ error: 'Method not allowed' });
+
+    const result = await pool.query(
+      `INSERT INTO public.donations
+       (donor_name, donor_email, amount, donation_type, donor_phone, donor_address, public_message, is_anonymous)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       RETURNING id, created_at`,
+      [
+        donorName,
+        donorEmail,
+        amt,
+        donationType || 'monetary',
+        donorPhone || null,
+        donorAddress || null,
+        publicMessage || null,
+        Boolean(isAnonymous),
+      ]
+    );
+
+    res.status(201).json({
+      success: true,
+      id: result.rows[0].id,
+      createdAt: result.rows[0].created_at,
+    });
+  } catch (err) {
+    console.error('donations.js error:', err && err.message ? err.message : err);
+    res.status(500).json({ success: false, message: 'Failed to save donation' });
   }
-}
+};
