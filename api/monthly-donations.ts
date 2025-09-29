@@ -1,43 +1,26 @@
-import { NextApiRequest, NextApiResponse } from "next";
-import { storage } from "../server/storage";
-import { donations } from "../shared/schema";
+const { Pool } = require('pg');
 
-const dbSql = neon(process.env.DATABASE_URL!);
-const db = drizzle(dbSql, { schema });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+module.exports = async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
+        COALESCE(SUM(amount), 0)::numeric(12,2)            AS total
+      FROM public.donations
+      GROUP BY 1
+      ORDER BY 1
+    `);
 
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
+    res.status(200).json({
+      success: true,
+      series: rows.map(r => ({ month: r.month, total: Number(r.total) })),
+    });
+  } catch (err) {
+    console.error('monthly-donations.js error:', err && err.message ? err.message : err);
+    res.status(500).json({ success: false, message: 'Failed to load monthly data' });
   }
-
-  if (req.method === 'GET') {
-    try {
-      const monthlyData = await db.execute(sql`
-        SELECT 
-          TO_CHAR(created_at, 'Mon') as month,
-          SUM(CAST(amount AS DECIMAL)) as total
-        FROM donations 
-        WHERE created_at >= CURRENT_DATE - INTERVAL '12 months'
-        GROUP BY DATE_TRUNC('month', created_at), TO_CHAR(created_at, 'Mon')
-        ORDER BY DATE_TRUNC('month', created_at)
-      `);
-
-      res.json(monthlyData.rows.map(row => ({
-        month: row.month,
-        total: Number(row.total)
-      })));
-    } catch (error) {
-      console.error("Error fetching monthly donations:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  } else {
-    res.status(405).json({ error: 'Method not allowed' });
-  }
-}
+};
