@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "pg": "^8.11.3",
 "pg": "^8.11.5"
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
