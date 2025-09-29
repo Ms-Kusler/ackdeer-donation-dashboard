@@ -1,8 +1,6 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
-import { sql } from 'drizzle-orm';
-import * as schema from '../shared/schema';
+import { NextApiRequest, NextApiResponse } from "next";
+import { storage } from "../server/storage";
+import { donations } from "../shared/schema";
 
 const dbSql = neon(process.env.DATABASE_URL!);
 const db = drizzle(dbSql, { schema });
