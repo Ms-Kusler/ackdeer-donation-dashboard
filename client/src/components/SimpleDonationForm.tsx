@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 
 export default function SimpleDonationForm() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -21,7 +21,9 @@ export default function SimpleDonationForm() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+  const handleInputChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
     const { name, value, type } = e.target;
     setFormData(prev => ({
       ...prev,
@@ -47,18 +49,14 @@ export default function SimpleDonationForm() {
 
       const response = await fetch('/api/donations', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(submissionData),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to record donation');
-      }
+      if (!response.ok) throw new Error('Failed to record donation');
 
       toast({
-        title: "Donation Recorded",
+        title: 'Donation Recorded',
         description: `Thank you ${formData.firstName}! Your donation of $${formData.amount} has been recorded. A thank you email has been sent.`,
       });
 
@@ -75,15 +73,18 @@ export default function SimpleDonationForm() {
         isAnonymous: false,
       });
 
-      // Refresh data
-      queryClient.invalidateQueries({ queryKey: ['/api/public-stats'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/monthly-donations'] });
-
+      // 🔥 Force the stats & charts to refresh immediately
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['/api/public-stats'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/monthly-donations'] }),
+        queryClient.refetchQueries({ queryKey: ['/api/public-stats'] }),
+        queryClient.refetchQueries({ queryKey: ['/api/monthly-donations'] }),
+      ]);
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to record donation. Please try again.",
-        variant: "destructive",
+        title: 'Error',
+        description: error?.message || 'Failed to record donation. Please try again.',
+        variant: 'destructive',
       });
     } finally {
       setIsSubmitting(false);
@@ -93,13 +94,11 @@ export default function SimpleDonationForm() {
   return (
     <section className="mb-12" data-testid="donation-form-section">
       <Card className="relative p-8 shadow-lg">
-        {/* Professional accent border */}
-        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-green-600 via-green-700 to-green-600 rounded-t-lg"></div>
-        
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-green-600 via-green-700 to-green-600 rounded-t-lg" />
         <div className="relative mb-8">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 rounded-lg bg-green-100">
-              <div className="w-6 h-6 bg-gradient-to-br from-green-600 to-blue-600 rounded"></div>
+              <div className="w-6 h-6 bg-gradient-to-br from-green-600 to-blue-600 rounded" />
             </div>
             <h2 className="text-2xl font-bold text-gray-900" data-testid="form-title">
               Record a Donation
@@ -128,7 +127,7 @@ export default function SimpleDonationForm() {
                 data-testid="input-first-name"
               />
             </div>
-            
+
             <div>
               <label htmlFor="lastName" className="block text-sm font-medium text-gray-700 mb-2">
                 Last Name *
@@ -271,9 +270,7 @@ export default function SimpleDonationForm() {
               <label htmlFor="isAnonymous" className="text-base font-medium text-gray-900 cursor-pointer">
                 Make this donation anonymous
               </label>
-              <p className="text-sm text-gray-600">
-                Your name will not be displayed publicly
-              </p>
+              <p className="text-sm text-gray-600">Your name will not be displayed publicly</p>
             </div>
           </div>
 
@@ -290,4 +287,4 @@ export default function SimpleDonationForm() {
       </Card>
     </section>
   );
-}
+      }
