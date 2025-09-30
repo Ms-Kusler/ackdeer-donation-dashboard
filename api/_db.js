@@ -13,9 +13,11 @@ let pool = globalThis._ackdeerPool;
 if (!pool) {
   pool = new Pool({
     connectionString,
-    ssl: { rejectUnauthorized: false }
+    ssl: { rejectUnauthorized: false },
   });
   globalThis._ackdeerPool = pool;
 }
 
+// ✅ Export both default and named
+export { pool };
 export default pool;
