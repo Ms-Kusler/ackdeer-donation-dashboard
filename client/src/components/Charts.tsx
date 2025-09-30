@@ -1,133 +1,93 @@
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { RefreshCw } from 'lucide-react';
+// client/src/components/Charts.tsx
+import * as React from 'react';
+import { useQuery } from '@tanstack/react-query';
+
+// Try to use recharts if it exists; otherwise we render a table fallback.
+let Recharts:
+  | { LineChart:any; Line:any; XAxis:any; YAxis:any; Tooltip:any; CartesianGrid:any; ResponsiveContainer:any }
+  | null = null;
+try {
+  // @ts-ignore
+  const rc = require('recharts');
+  Recharts = {
+    LineChart: rc.LineChart,
+    Line: rc.Line,
+    XAxis: rc.XAxis,
+    YAxis: rc.YAxis,
+    Tooltip: rc.Tooltip,
+    CartesianGrid: rc.CartesianGrid,
+    ResponsiveContainer: rc.ResponsiveContainer,
+  };
+} catch {
+  Recharts = null;
+}
+
+type MonthlyRow = { month: string; total: number };
 
 export default function Charts() {
-  const queryClient = useQueryClient();
-  
-  const { data: monthlyData, isLoading, refetch } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['/api/monthly-donations'],
     queryFn: async () => {
-      const response = await fetch('/api/monthly-donations');
-      if (!response.ok) {
-        throw new Error('Failed to fetch monthly data');
-      }
-      const data = await response.json();
-      
-      // Transform data for chart display
-      return data.map((item: { month: string; amount: number }) => ({
-        month: new Date(item.month + '-01').toLocaleDateString('en', { month: 'short' }),
-        donations: item.amount
-      }));
+      const res = await fetch('/api/monthly-donations', { cache: 'no-store' });
+      if (!res.ok) throw new Error('Failed to fetch monthly donations');
+      const json = await res.json();
+      return (json?.data ?? []) as MonthlyRow[];
     },
+    staleTime: 0,
   });
 
-  const handleRefresh = () => {
-    refetch();
-  };
+  if (isLoading) return <div>Loading chart…</div>;
+  if (error) return <div className="text-red-600">Couldn’t load chart.</div>;
 
+  const rows = (data ?? []).map(r => ({
+    month: prettyMonth(r.month),
+    total: Number(r.total ?? 0),
+  }));
+
+  if (Recharts && rows.length > 0) {
+    const { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } = Recharts;
+    return (
+      <div className="h-72 w-full rounded-lg border p-3">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={rows} margin={{ top: 10, right: 16, bottom: 0, left: -8 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="month" />
+            <YAxis />
+            <Tooltip />
+            <Line type="monotone" dataKey="total" stroke="#16a34a" strokeWidth={2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  // Fallback table if recharts isn't installed
   return (
-    <section className="mb-12" data-testid="charts-section">
-      <Card className="relative p-6 shadow-lg hover-elevate">
-        {/* Subtle texture */}
-        <div 
-          className="absolute inset-0 opacity-5 rounded-lg"
-          style={{
-            backgroundImage: 'linear-gradient(45deg, rgba(34, 80, 149, 0.1) 25%, transparent 25%), linear-gradient(-45deg, rgba(34, 80, 149, 0.1) 25%, transparent 25%)',
-            backgroundSize: '10px 10px'
-          }}
-        />
-        
-        {/* Professional accent border */}
-        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary/60 via-primary to-primary/60 rounded-t-lg"></div>
-        
-        <div className="relative flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-accent/10">
-              <div className="w-6 h-6 bg-gradient-to-br from-primary to-accent rounded"></div>
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold text-foreground" data-testid="chart-title">
-                Monthly Donations ($)
-              </h2>
-              <p className="text-sm text-muted-foreground">Tracking community support</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 flex-shrink-0">
-            <Badge 
-              variant="secondary" 
-              className="bg-accent/10 text-accent border border-accent/30" 
-              data-testid="chart-badge"
-            >
-              Updated Today
-            </Badge>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={handleRefresh}
-              className="flex items-center gap-2"
-              data-testid="button-refresh"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Refresh
-            </Button>
-          </div>
-        </div>
-        
-        <div className="h-80 w-full" data-testid="chart-container">
-          {isLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="animate-pulse text-muted-foreground">Loading chart data...</div>
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={monthlyData || []}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis 
-                  dataKey="month" 
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={12}
-                />
-                <YAxis 
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={12}
-                  tickFormatter={(value) => `$${value.toLocaleString()}`}
-                />
-                <Tooltip 
-                  formatter={(value) => [`$${value.toLocaleString()}`, 'Donations']}
-                  labelStyle={{ color: 'hsl(var(--foreground))' }}
-                  contentStyle={{ 
-                    backgroundColor: 'hsl(var(--card))', 
-                    border: '1px solid hsl(var(--primary))',
-                    borderRadius: '12px',
-                    boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
-                  }}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="donations" 
-                  stroke="url(#naturalGradient)"
-                  strokeWidth={3}
-                  dot={{ fill: '#166534', strokeWidth: 2, r: 4 }}
-                  activeDot={{ r: 6, stroke: '#166534', strokeWidth: 2, fill: '#2563eb' }}
-                />
-                <defs>
-                  <linearGradient id="naturalGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#166534" />
-                    <stop offset="25%" stopColor="#15803d" />
-                    <stop offset="50%" stopColor="#2563eb" />
-                    <stop offset="75%" stopColor="#1e40af" />
-                    <stop offset="100%" stopColor="#1e3a8a" />
-                  </linearGradient>
-                </defs>
-              </LineChart>
-            </ResponsiveContainer>
+    <div className="rounded-lg border p-4">
+      <div className="mb-2 font-semibold">Monthly Donations</div>
+      <table className="w-full text-sm">
+        <thead className="text-left text-gray-500">
+          <tr><th className="py-1">Month</th><th className="py-1">Total (USD)</th></tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.month} className="border-t">
+              <td className="py-1">{r.month}</td>
+              <td className="py-1">${r.total.toLocaleString()}</td>
+            </tr>
+          ))}
+          {rows.length === 0 && (
+            <tr><td colSpan={2} className="py-2 text-gray-500">No data yet</td></tr>
           )}
-        </div>
-      </Card>
-    </section>
+        </tbody>
+      </table>
+    </div>
   );
+}
+
+function prettyMonth(m: string) {
+  if (!m) return m;
+  const [y, mo] = m.split('-');
+  const d = new Date(Number(y), Number(mo) - 1, 1);
+  return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
 }
